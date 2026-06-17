@@ -1,0 +1,19 @@
+{
+  "name": "ceklar-keeper",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsx keeper.ts",
+    "dev": "tsx --watch keeper.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "tsx": "^4.22.4",
+    "viem": "^2.52.2"
+  },
+  "description": ""
+}

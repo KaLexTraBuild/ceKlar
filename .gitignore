@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Environment — NEVER commit these
+.env
+.env.local
+.env.*
+
+# Keeper state
+keeper-state.json
+
+# Foundry
+ceklar/out/
+ceklar/cache/
+ceklar/.git/
+
+# Build artifacts
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

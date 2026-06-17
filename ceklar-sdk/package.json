@@ -1,0 +1,19 @@
+{
+  "name": "ceklar-sdk",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "viem": "^2.52.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
