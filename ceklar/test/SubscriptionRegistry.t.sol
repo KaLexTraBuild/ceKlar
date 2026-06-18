@@ -10,16 +10,42 @@ contract SubscriptionRegistryTest is Test {
     address merchant = address(0xBEEF);
     address subscriber = address(0xCAFE);
     address attacker = address(0xBAD);
+    address pullPaymentAddr = address(0x9999);
 
     bytes32 planId = keccak256("plan-1");
 
     function setUp() public {
         registry = new SubscriptionRegistry();
+        registry.setPullPayment(pullPaymentAddr);
     }
 
     function _createBasicPlan() internal {
         vm.prank(merchant);
         registry.createPlan(planId, 5_000_000, SubscriptionRegistry.Interval.Monthly, 0, 0);
+    }
+
+    function _createSub(bytes32 _planId, address _subscriber) internal {
+        vm.prank(pullPaymentAddr);
+        registry.createSubscription(_planId, _subscriber);
+    }
+
+    function _advanceBilling(bytes32 subId) internal {
+        vm.prank(pullPaymentAddr);
+        registry.advanceBilling(subId);
+    }
+
+    // ---------- setPullPayment ----------
+
+    function test_setPullPayment_onlyOwner() public {
+        SubscriptionRegistry fresh = new SubscriptionRegistry();
+        vm.prank(attacker);
+        vm.expectRevert(SubscriptionRegistry.NotOwner.selector);
+        fresh.setPullPayment(pullPaymentAddr);
+    }
+
+    function test_setPullPayment_onlyOnce() public {
+        vm.expectRevert(SubscriptionRegistry.PullPaymentAlreadySet.selector);
+        registry.setPullPayment(address(0xdead));
     }
 
     // ---------- createPlan ----------
@@ -76,7 +102,7 @@ contract SubscriptionRegistryTest is Test {
 
     function test_createSubscription_success() public {
         _createBasicPlan();
-        registry.createSubscription(planId, subscriber);
+        _createSub(planId, subscriber);
 
         bytes32 subId = registry.subscriptionId(planId, subscriber);
         SubscriptionRegistry.Subscription memory sub = registry.getSubscription(subId);
@@ -90,40 +116,42 @@ contract SubscriptionRegistryTest is Test {
         vm.prank(merchant);
         registry.pausePlan(planId);
 
+        vm.prank(pullPaymentAddr);
         vm.expectRevert(abi.encodeWithSelector(SubscriptionRegistry.PlanNotActive.selector, planId));
         registry.createSubscription(planId, subscriber);
     }
 
     function test_createSubscription_revertsOnDuplicate() public {
         _createBasicPlan();
-        registry.createSubscription(planId, subscriber);
+        _createSub(planId, subscriber);
 
+        vm.prank(pullPaymentAddr);
         vm.expectRevert(abi.encodeWithSelector(SubscriptionRegistry.AlreadySubscribed.selector, planId, subscriber));
         registry.createSubscription(planId, subscriber);
     }
 
-    /// @notice VULNERABILITY (medium): createSubscription has no access
-    /// control. Anyone can create a subscription record for an arbitrary
-    /// address, with no consent and no payment ever taking place.
-    function test_VULN_anyoneCanCreateSubscriptionForVictim() public {
+    /// @notice FIXED: createSubscription now reverts for any caller other
+    /// than the registered PullPayment contract. An attacker can no longer
+    /// create a subscription record for an arbitrary victim address.
+    function test_FIXED_onlyPullPaymentCanCreateSubscription() public {
         _createBasicPlan();
         address victim = makeAddr("victim");
 
         vm.prank(attacker);
+        vm.expectRevert(SubscriptionRegistry.NotPullPayment.selector);
         registry.createSubscription(planId, victim);
 
+        // confirm the legitimate path still works
+        _createSub(planId, victim);
         bytes32 subId = registry.subscriptionId(planId, victim);
-        SubscriptionRegistry.Subscription memory sub = registry.getSubscription(subId);
-
-        assertTrue(sub.active);
-        assertEq(sub.subscriber, victim);
+        assertTrue(registry.getSubscription(subId).active);
     }
 
     // ---------- cancel subscription ----------
 
     function test_cancelSubscription_onlySubscriber() public {
         _createBasicPlan();
-        registry.createSubscription(planId, subscriber);
+        _createSub(planId, subscriber);
         bytes32 subId = registry.subscriptionId(planId, subscriber);
 
         vm.prank(attacker);
@@ -135,26 +163,36 @@ contract SubscriptionRegistryTest is Test {
         assertFalse(registry.getSubscription(subId).active);
     }
 
-    // ---------- advanceBilling: the critical one ----------
+    // ---------- advanceBilling ----------
 
-    /// @notice VULNERABILITY (critical): advanceBilling has no access
-    /// control and no check that billing is actually due. The subscriber
-    /// can call it directly on the registry the moment each cycle becomes
-    /// due, resetting nextBillingAt for free — bypassing PullPayment and
-    /// every USDC pull entirely. Repeated once per cycle, this is
-    /// indefinite free service.
-    function test_VULN_subscriberCanSkipBillingForever() public {
+    /// @notice FIXED: advanceBilling now reverts for any caller other than
+    /// the registered PullPayment contract. A subscriber can no longer
+    /// advance their own billing date without an actual payment.
+    function test_FIXED_onlyPullPaymentCanAdvanceBilling() public {
         _createBasicPlan();
-        registry.createSubscription(planId, subscriber);
+        _createSub(planId, subscriber);
+        bytes32 subId = registry.subscriptionId(planId, subscriber);
+
+        vm.warp(block.timestamp + 30 days);
+
+        vm.prank(subscriber);
+        vm.expectRevert(SubscriptionRegistry.NotPullPayment.selector);
+        registry.advanceBilling(subId);
+
+        // confirm the legitimate path still works
+        _advanceBilling(subId);
+        assertEq(registry.getSubscription(subId).billingCount, 1);
+    }
+
+    function test_advanceBilling_legitimateFlowAcrossMultipleCycles() public {
+        _createBasicPlan();
+        _createSub(planId, subscriber);
         bytes32 subId = registry.subscriptionId(planId, subscriber);
 
         for (uint256 i = 0; i < 6; i++) {
             vm.warp(block.timestamp + 30 days);
             assertTrue(registry.isBillingDue(subId));
-
-            vm.prank(subscriber);
-            registry.advanceBilling(subId);
-
+            _advanceBilling(subId);
             assertFalse(registry.isBillingDue(subId));
         }
 
@@ -165,7 +203,7 @@ contract SubscriptionRegistryTest is Test {
 
     function test_upgradeSubscription_success() public {
         _createBasicPlan();
-        registry.createSubscription(planId, subscriber);
+        _createSub(planId, subscriber);
         bytes32 oldSubId = registry.subscriptionId(planId, subscriber);
 
         bytes32 newPlanId = keccak256("plan-2");
@@ -183,14 +221,14 @@ contract SubscriptionRegistryTest is Test {
 
     function test_isBillingDue_falseBeforeInterval() public {
         _createBasicPlan();
-        registry.createSubscription(planId, subscriber);
+        _createSub(planId, subscriber);
         bytes32 subId = registry.subscriptionId(planId, subscriber);
         assertFalse(registry.isBillingDue(subId));
     }
 
     function test_isBillingDue_trueAfterInterval() public {
         _createBasicPlan();
-        registry.createSubscription(planId, subscriber);
+        _createSub(planId, subscriber);
         bytes32 subId = registry.subscriptionId(planId, subscriber);
         vm.warp(block.timestamp + 31 days);
         assertTrue(registry.isBillingDue(subId));

@@ -35,6 +35,9 @@ contract SubscriptionRegistry {
     uint256 public totalPlans;
     uint256 public totalSubscriptions;
 
+    address public owner;
+    address public pullPayment;
+
     event PlanCreated(bytes32 indexed planId, address indexed merchant, uint256 price, Interval interval, uint256 trialDays);
     event PlanPaused(bytes32 indexed planId, address indexed merchant);
     event PlanResumed(bytes32 indexed planId, address indexed merchant);
@@ -56,6 +59,26 @@ contract SubscriptionRegistry {
     error InvalidPrice();
     error InvalidCustomInterval();
     error ZeroPlanId();
+    error NotOwner();
+    error NotPullPayment();
+    error ZeroAddress();
+    error PullPaymentAlreadySet();
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    modifier onlyPullPayment() {
+        if (msg.sender != pullPayment) revert NotPullPayment();
+        _;
+    }
+
+    function setPullPayment(address _pullPayment) external {
+        if (msg.sender != owner)        revert NotOwner();
+        if (pullPayment != address(0))  revert PullPaymentAlreadySet();
+        if (_pullPayment == address(0)) revert ZeroAddress();
+        pullPayment = _pullPayment;
+    }
 
     function createPlan(
         bytes32 planId,
@@ -99,7 +122,7 @@ contract SubscriptionRegistry {
     }
 
     function createSubscription(bytes32 planId, address subscriber)
-        external returns (bytes32 subscriptionId)
+        external onlyPullPayment returns (bytes32 subscriptionId)
     {
         Plan storage plan = _plans[planId];
         if (plan.createdAt == 0) revert PlanNotFound(planId);
@@ -179,7 +202,7 @@ contract SubscriptionRegistry {
         emit SubscriptionUpgraded(oldSubscriptionId, newSubscriptionId, newPlanId);
     }
 
-    function advanceBilling(bytes32 subscriptionId) external {
+    function advanceBilling(bytes32 subscriptionId) external onlyPullPayment {
         Subscription storage sub = _subscriptions[subscriptionId];
         if (!sub.active) revert SubscriptionNotActive(subscriptionId);
         Plan storage plan     = _plans[sub.planId];

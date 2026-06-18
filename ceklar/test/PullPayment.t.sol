@@ -26,6 +26,7 @@ contract PullPaymentTest is Test {
         vault = new RevenueVault(address(usdc));
         pull = new PullPayment(address(usdc), address(registry), address(vault), feeRecipient);
         vault.setPullPayment(address(pull));
+        registry.setPullPayment(address(pull));
 
         vm.prank(merchant);
         registry.createPlan(planId, price, SubscriptionRegistry.Interval.Monthly, 0, 0);
@@ -177,22 +178,23 @@ contract PullPaymentTest is Test {
 
     // ---------- the critical cross-contract exploit ----------
 
-    /// @notice CRITICAL: confirms the registry access-control gap lets a
-    /// subscriber bypass PullPayment entirely after their first payment.
-    /// The keeper would never see this subscription as due again, and
-    /// the merchant receives nothing beyond the initial charge.
-    function test_VULN_subscriberEscapesAllFutureBillingViaRegistry() public {
+    /// @notice FIXED: the registry access-control gap that let a
+    /// subscriber bypass PullPayment and skip all future billing for
+    /// free is now closed. Calling advanceBilling() directly, outside of
+    /// PullPayment, correctly reverts.
+    function test_FIXED_subscriberCanNoLongerEscapeBillingViaRegistry() public {
         vm.prank(subscriber);
         bytes32 subId = pull.subscribe(planId, 100_000_000);
 
-        uint256 merchantBalanceAfterFirstPayment = vault.getBalance(merchant);
+        vm.warp(block.timestamp + 31 days);
 
         vm.prank(subscriber);
-        for (uint256 i = 0; i < 200; i++) {
-            registry.advanceBilling(subId);
-        }
+        vm.expectRevert(SubscriptionRegistry.NotPullPayment.selector);
+        registry.advanceBilling(subId);
 
-        assertFalse(registry.isBillingDue(subId));
-        assertEq(vault.getBalance(merchant), merchantBalanceAfterFirstPayment);
+        // billing is still correctly due, and still only payable through PullPayment
+        assertTrue(registry.isBillingDue(subId));
+        pull.triggerBilling(subId);
+        assertEq(registry.getSubscription(subId).billingCount, 2);
     }
 }
