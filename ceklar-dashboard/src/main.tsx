@@ -5,12 +5,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { injected } from 'wagmi/connectors'
 import App from './App.tsx'
 import Subscribe from './Subscribe.tsx'
+import NetworkBanner from './NetworkBanner.tsx'
+import ConnectedAddress from './ConnectedAddress.tsx'
 import './index.css'
 
 const arcTestnet = {
   id: 5042002,
   name: 'Arc Testnet',
-  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 6 },
+  nativeCurrency: { name: 'ARC', symbol: 'ARC', decimals: 18 },
   rpcUrls: { default: { http: ['https://rpc.testnet.arc.network'] } },
   blockExplorers: {
     default: { name: 'ArcScan', url: 'https://testnet.arcscan.app' },
@@ -32,6 +34,8 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
+        <NetworkBanner />
+        <ConnectedAddress />
         {isSubscribePage ? <Subscribe /> : <App />}
       </QueryClientProvider>
     </WagmiProvider>
