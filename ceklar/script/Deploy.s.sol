@@ -33,9 +33,12 @@ contract DeployCeklar is Script {
         );
         console.log("PullPayment:         ", address(pull));
 
-        // 4. Wire vault to PullPayment
+        // 4. Wire vault and registry to PullPayment
         vault.setPullPayment(address(pull));
         console.log("Vault wired: OK");
+
+        registry.setPullPayment(address(pull));
+        console.log("Registry wired: OK");
 
         vm.stopBroadcast();
 
