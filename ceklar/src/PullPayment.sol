@@ -26,6 +26,7 @@ contract PullPayment {
     address public owner;
     address public feeRecipient;
     uint256 public protocolFeeBps;
+    bool public paused;
 
     mapping(bytes32 => uint256) public graceExpiresAt;
     mapping(bytes32 => uint256) public failedAttempts;
@@ -36,6 +37,8 @@ contract PullPayment {
     event SubscriptionExpired(bytes32 indexed subscriptionId, address indexed subscriber);
     event ProtocolFeeUpdated(uint256 oldBps, uint256 newBps);
     event FeeRecipientUpdated(address oldRecipient, address newRecipient);
+    event Paused(address indexed by);
+    event Unpaused(address indexed by);
 
     error NotOwner();
     error ZeroAddress();
@@ -43,6 +46,7 @@ contract PullPayment {
     error BillingNotDue(bytes32 subscriptionId, uint256 nextBillingAt);
     error InsufficientAllowance(address subscriber, uint256 required, uint256 actual);
     error TransferFailed();
+    error ContractPaused();
 
     constructor(
         address _usdc,
@@ -66,10 +70,25 @@ contract PullPayment {
         _;
     }
 
+    modifier whenNotPaused() {
+        if (paused) revert ContractPaused();
+        _;
+    }
+
+    function pause() external onlyOwner {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
     function subscribe(
         bytes32 planId,
         uint256 allowanceAmount
-    ) external returns (bytes32 subscriptionId) {
+    ) external whenNotPaused returns (bytes32 subscriptionId) {
         SubscriptionRegistry reg  = SubscriptionRegistry(registry);
         SubscriptionRegistry.Plan memory plan = reg.getPlan(planId);
 
@@ -88,7 +107,7 @@ contract PullPayment {
         emit Subscribed(subscriptionId, planId, msg.sender, allowanceAmount);
     }
 
-    function triggerBilling(bytes32 subscriptionId) external {
+    function triggerBilling(bytes32 subscriptionId) external whenNotPaused {
         SubscriptionRegistry reg  = SubscriptionRegistry(registry);
         SubscriptionRegistry.Subscription memory sub = reg.getSubscription(subscriptionId);
         SubscriptionRegistry.Plan memory plan         = reg.getPlan(sub.planId);

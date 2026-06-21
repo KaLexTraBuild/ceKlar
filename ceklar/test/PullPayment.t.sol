@@ -156,6 +156,70 @@ contract PullPaymentTest is Test {
         assertEq(pull.failedAttempts(subId), 1);
     }
 
+    // ---------- pause / unpause ----------
+
+    function test_pause_onlyOwner() public {
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert(PullPayment.NotOwner.selector);
+        pull.pause();
+    }
+
+    function test_pause_blocksSubscribe() public {
+        pull.pause();
+
+        vm.prank(subscriber);
+        vm.expectRevert(PullPayment.ContractPaused.selector);
+        pull.subscribe(planId, 100_000_000);
+    }
+
+    function test_pause_blocksTriggerBilling() public {
+        vm.prank(subscriber);
+        bytes32 subId = pull.subscribe(planId, 100_000_000);
+        vm.warp(block.timestamp + 31 days);
+
+        pull.pause();
+
+        vm.expectRevert(PullPayment.ContractPaused.selector);
+        pull.triggerBilling(subId);
+    }
+
+    function test_unpause_onlyOwner() public {
+        pull.pause();
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert(PullPayment.NotOwner.selector);
+        pull.unpause();
+    }
+
+    function test_unpause_restoresNormalOperation() public {
+        vm.prank(subscriber);
+        bytes32 subId = pull.subscribe(planId, 100_000_000);
+        vm.warp(block.timestamp + 31 days);
+
+        pull.pause();
+        vm.expectRevert(PullPayment.ContractPaused.selector);
+        pull.triggerBilling(subId);
+
+        pull.unpause();
+        pull.triggerBilling(subId);
+
+        assertEq(registry.getSubscription(subId).billingCount, 2);
+    }
+
+    function test_pause_doesNotAffectViewFunctions() public {
+        vm.prank(subscriber);
+        bytes32 subId = pull.subscribe(planId, 100_000_000);
+
+        pull.pause();
+
+        // reads should still work — pause only blocks state-changing billing actions
+        (uint256 fee, uint256 net) = pull.calculateFee(1_000_000);
+        assertEq(fee, 7_500);
+        assertEq(net, 992_500);
+        assertTrue(pull.isHealthy(subId));
+    }
+
     // ---------- fees & ownership ----------
 
     function test_calculateFee() public {
